@@ -1,0 +1,9 @@
+.DS_Store
+build
+out
+.idea
+*.swp
+*.swo
+*.bak
+package-lock.json
+node_modules

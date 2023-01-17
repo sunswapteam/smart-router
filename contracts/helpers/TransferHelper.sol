@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MIT
+pragma solidity >=0.4.22 <0.9.0;
+
 // helper methods for interacting with TRC20 tokens  that do not consistently return true/false
 library TransferHelper {
     //TODO: Replace in deloy script
@@ -31,4 +34,14 @@ library TransferHelper {
         require(success, 'TransferHelper: ETH_TRANSFER_FAILED');
     }
 
+    function executeTransaction(address target, uint value, string memory signature, bytes memory data) internal returns (bool success, bytes memory returnData) {
+        bytes memory callData;
+
+        if (bytes(signature).length == 0) {
+            callData = data;
+        } else {
+            callData = abi.encodePacked(bytes4(keccak256(bytes(signature))), data);
+        }
+        (success, returnData) = target.call.value(value)(callData);
+    }
 }
