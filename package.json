@@ -1,22 +1,42 @@
 {
   "name": "smart-router",
   "version": "1.0.0",
+  "description": "",
   "scripts": {
-    "compile": "tronbox compile",
-    "migrate": "tronbox migrate --network nile --f 1 --to 2"
+    "compile": "yarn truffle compile",
+    "clean": "rm -rf build/",
+    "develop": "yarn truffle develop",
+    "test": "yarn truffle test",
+    "test:clean": "yarn clean && sh -x truffle-test.sh",
+    "migrate": "yarn tronbox migrate --network nile --f 1 --to 2",
+    "eslint": "eslint --ext .js .",
+    "prettier:check": "prettier --check . --config .prettierrc",
+    "prettier:fix": "prettier --write . --config .prettierrc",
+    "lint": "yarn eslint && yarn prettier:check",
+    "coverage": "yarn truffle run coverage --network development",
+    "ganache": "yarn ganache-cli -m 'grace silly cancel salmon vibrant later sentence such basket regular sunny satoshi' -e 10000000"
   },
+  "keywords": [],
+  "author": "",
   "license": "MIT",
   "dependencies": {
-    "tronbox": "git+https://github.com/suniodev02/tronbox.git#009402ebdf15bbc92cc56d6a00d40d703e3aa7ce",
-    "axios": "^0.21.2"
+    "tronbox": "^2.7.25"
   },
   "devDependencies": {
+    "bn-chai": "^1.0.1",
     "chai": "^4.2.0",
+    "chai-as-promised": "^7.1.1",
     "eslint": "^6.6.0",
     "eslint-config-prettier": "^6.12.0",
     "eslint-plugin-prettier": "^3.1.4",
+    "ganache-cli": "6.12.2",
     "mocha": "^8.1.3",
     "prettier": "^2.1.2",
+    "solidity-coverage": "^0.7.22",
+    "tronweb": "^4.3.0",
+    "truffle": "5.5.30",
+    "web3": ">=1.3.4",
+    "web3-utils": ">=1.3.4",
     "yarn": "^1.22.18"
   }
 }
