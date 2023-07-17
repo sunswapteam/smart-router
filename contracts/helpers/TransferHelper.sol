@@ -5,8 +5,8 @@ pragma solidity >=0.4.22 <0.9.0;
 library TransferHelper {
     //TODO: Replace in deloy script
     // nile:0xECa9bC828A3005B9a3b909f2cc5c2a54794DE05F  mainnet:0xa614f803B6FD780986A42c78Ec9c7f77e6DeD13C
+    // address constant USDTAddr = 0xECa9bC828A3005B9a3b909f2cc5c2a54794DE05F;
     address constant USDTAddr = 0xa614f803B6FD780986A42c78Ec9c7f77e6DeD13C;
-
     function safeApprove(address token, address to, uint value) internal returns (bool){
         // bytes4(keccak256(bytes('approve(address,uint256)')));
         (bool success, bytes memory data) = token.call(abi.encodeWithSelector(0x095ea7b3, to, value));
