@@ -37,58 +37,44 @@ contract SmartExchangeRouterTest is SmartExchangeRouter {
                                    address recipient,
                                    uint256 amountIn,
                                    uint256[] amountsOut);
-  event TestSwapExactTokensForTokens(address indexed tokenIn,
-                                    address indexed tokenOut,
-                                    address indexed buyer,
-                                    address recipient,
-                                    uint256 amountIn,
-                                    uint256[] amountsOut);
-  event TestSwapExactETHForTokens(address indexed tokenIn,
-                                  address indexed tokenOut,
-                                  address indexed buyer,
-                                  address recipient,
-                                  uint256 amountIn,
-                                  uint256[] amountsOut);
-  event TestSwapExactETHForETH(address indexed tokenIn,
-                               address indexed tokenOut,
-                               address indexed buyer,
-                               address recipient,
-                               uint256 amountIn,
-                               uint256[] amountsOut);
   event SwapExactTokensForTokensV2(address indexed tokenIn,
                                    address indexed tokenOut,
                                    address indexed buyer,
                                    address recipient,
                                    uint256 amountIn,
                                    uint256[] amountsOut);
+  event SwapExactInputV3( address indexed tokenIn,
+                          address indexed tokenOut,
+                          address indexed buyer,
+                          address recipient,
+                          uint256 amountIn,
+                          uint256[] amountsOut);
 
   address usdt;
 
   constructor(
-    address _old3pool,
-    address _usdcPool,
     address _v2Router,
+    address _v3Router,
     address _v1Foctroy,
-    address _usdt,
-    address _usdj,
-    address _tusd,
-    address _usdc,
-    address _usdd
-  ) public SmartExchangeRouter(_old3pool,
-                               _usdcPool,
-                               _v2Router,
+    address _usdd,
+    address _wtrx,
+    address _usdt
+  ) public SmartExchangeRouter(_v2Router,
                                _v1Foctroy,
-                               _usdt,
-                               _usdj,
-                               _tusd,
-                               _usdc,
-                               _usdd) {
+                               _usdd,
+                               _v3Router,
+                               _wtrx) {
     usdt = _usdt;
   }
 
   function constructPathSlice(address[] memory path, uint256 pos, uint256 len)
       public pure returns(address[] memory pathOut) {
     return _constructPathSlice(path, pos, len);
+  }
+
+  function constructFeesSlice(uint24[] memory fee, uint256 pos, uint256 len)
+      public pure returns(uint24[] memory pathOut) {
+    return _constructFeesSlice(fee, pos, len);
   }
 
   function tokenSafeTransferFrom(address token,
@@ -191,69 +177,6 @@ contract SmartExchangeRouterTest is SmartExchangeRouter {
                                     amountsOut);
   }
 
-  function testSwapExactTokensForTokens(uint256 amountIn,
-                                        uint256 amountOutMin,
-                                        address[] memory path,
-                                        address recipient,
-                                        uint256 deadline)
-      public returns (uint256[] memory amountsOut) {
-    Context memory context;
-    context.amountIn = amountIn;
-    context.pathSlice = path;
-    context.amountOutMin = amountOutMin;
-    context.recipient = recipient;
-    context.deadline = deadline;
-    amountsOut = _swapExactTokensForTokens(context);
-    emit TestSwapExactTokensForTokens(path[0],
-                                      path[path.length - 1],
-                                      msg.sender,
-                                      recipient,
-                                      amountIn,
-                                      amountsOut);
-  }
-
-  function testSwapExactETHForTokens(uint256 amountIn,
-                                     uint256 amountOutMin,
-                                     address[] memory path,
-                                     address recipient,
-                                     uint256 deadline)
-      public payable returns (uint256[] memory amountsOut) {
-    Context memory context;
-    context.amountIn = amountIn;
-    context.pathSlice = path;
-    context.amountOutMin = amountOutMin;
-    context.recipient = recipient;
-    context.deadline = deadline;
-    amountsOut = _swapExactETHForTokens(context);
-    emit TestSwapExactETHForTokens(path[0],
-                                   path[path.length - 1],
-                                   msg.sender,
-                                   recipient,
-                                   amountIn,
-                                   amountsOut);
-  }
-
-  function testSwapExactETHForETH(uint256 amountIn,
-                                  uint256 amountOutMin,
-                                  address[] memory path,
-                                  address recipient,
-                                  uint256 deadline)
-      public payable returns (uint256[] memory amountsOut) {
-    Context memory context;
-    context.amountIn = amountIn;
-    context.pathSlice = path;
-    context.amountOutMin = amountOutMin;
-    context.recipient = recipient;
-    context.deadline = deadline;
-    amountsOut = _swapExactETHForETH(context);
-    emit TestSwapExactETHForETH(path[0],
-                                path[path.length - 1],
-                                msg.sender,
-                                recipient,
-                                amountIn,
-                                amountsOut);
-  }
-
   function swapExactTokensForTokensV2(uint256 amountIn,
                                       uint256 amountOutMin,
                                       address[] memory path,
@@ -275,6 +198,26 @@ contract SmartExchangeRouterTest is SmartExchangeRouter {
                                     amountsOut);
   }
 
+  function swapExactInputV3(uint256 amountIn,
+                                      uint256 amountOutMin,
+                                      address[] memory path,
+                                      address recipient,
+                                      uint256 deadline)
+      public payable returns (uint256[] memory amountsOut) {
+    Context memory context;
+    context.amountIn = amountIn;
+    context.pathSlice = path;
+    context.amountOutMin = amountOutMin;
+    context.recipient = recipient;
+    context.deadline = deadline;
+    amountsOut = _swapExactInputV3(context);
+    emit SwapExactTokensForTokensV2(path[0],
+                                    path[path.length - 1],
+                                    msg.sender,
+                                    recipient,
+                                    amountIn,
+                                    amountsOut);
+  }
   // to override walkaround usdt address issue
   function _tokenSafeTransfer(address token, address to, uint256 value)
       internal override returns(uint256 amountOut) {
