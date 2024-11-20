@@ -7,13 +7,15 @@ import "./interfaces/IPoolPsm.sol";
 import "./interfaces/IPoolStable.sol";
 import "./interfaces/IRouterV1.sol";
 import "./interfaces/IRouterV2.sol";
+import "./interfaces/IRouterV3.sol";
+import "./interfaces/IWTRX.sol";
 import "./helpers/ReentrancyGuard.sol";
 import "./helpers/SafeMath.sol";
 import "./helpers/TransferHelper.sol";
+import "./helpers/V3Encode.sol";
 
 contract SmartExchangeRouter is ReentrancyGuard {
   using SafeMath for uint256;
-
   struct Context {
     bytes32 version;
     uint256 len;
@@ -25,6 +27,7 @@ contract SmartExchangeRouter is ReentrancyGuard {
     address[] pathSlice;
     uint256[] amountsOutSlice;
     address recipient;
+    uint24[] feesSlice;
   }
 
   struct TransactionResult {
@@ -52,11 +55,14 @@ contract SmartExchangeRouter is ReentrancyGuard {
                    address indexed pool,
                    address[] tokens);
 
+  
   address public owner; // public for get method
   address public admin;
   address public v1Factory;
   address public v2Router;
+  address public v3Router;
   address public psmUsdd;
+  address public WTRX;
   mapping(address => mapping(address => bool)) tokenApprovedPool;
   mapping(address => bool) existPools;
   mapping(address => mapping(address => uint128)) poolToken;
@@ -69,38 +75,26 @@ contract SmartExchangeRouter is ReentrancyGuard {
   // TODO: hard code this to saving gas
   bytes32 constant poolVersionV1 = keccak256(abi.encodePacked("v1"));
   bytes32 constant poolVersionV2 = keccak256(abi.encodePacked("v2"));
-
+  bytes32 constant poolVersionV3 = keccak256(abi.encodePacked("v3"));
+  // nile WTRX = 0xfb3b3134F13CcD2C81F4012E53024e8135d58FeE;
+  // mainnet WTRX = 
   receive() external payable {}
   fallback() external payable {}
 
   constructor(
-    address _old3pool,
-    address _usdcPool,
     address _v2Router,
     address _v1Foctroy,
-    address _usdt,
-    address _usdj,
-    address _tusd,
-    address _usdc,
-    address _psmUsdd
+    address _psmUsdd,
+    address _v3Router,
+    address _wtrx
   ) public {
     owner = msg.sender;
     admin = msg.sender;
     v1Factory = _v1Foctroy;
     v2Router = _v2Router;
+    v3Router = _v3Router;
     psmUsdd = _psmUsdd;
-
-    address[] memory usdcTokens = new address[](4);
-    usdcTokens[0] = _usdc;
-    usdcTokens[1] = _usdj;
-    usdcTokens[2] = _tusd;
-    usdcTokens[3] = _usdt;
-    addUsdcPool("oldusdcpool", _usdcPool, usdcTokens);
-    address[] memory old3PoolTokens = new address[](3);
-    old3PoolTokens[0] = _usdj;
-    old3PoolTokens[1] = _tusd;
-    old3PoolTokens[2] = _usdt;
-    addPool("old3pool", _old3pool, old3PoolTokens);
+    WTRX = _wtrx;
   }
 
   modifier onlyOwner {
@@ -203,120 +197,54 @@ contract SmartExchangeRouter is ReentrancyGuard {
   }
 
   /**
-   * @dev Exchange function for converting TRX to Token in a specified path.
-   * @param amountIn Amount of TRX to be solded.
-   * @param amountOutMin Minimal amount of Token expected.
-   * @param path A specified exchange path from TRX to token.
-   * @param poolVersion List of pool where tokens in path belongs to.
-   * @param versionLen List of token num in each pool.
-   * @param to Address where token transfer to.
-   * @param deadline Time after which this transaction can no longer be executed.
-   * @return amountsOut Amount of Tokens bought corresponed to path.
-   */
-  function swapExactETHForTokens(uint256 amountIn,
-                                 uint256 amountOutMin,
-                                 address[] calldata path,
-                                 string[] calldata poolVersion,
-                                 uint256[] calldata versionLen,
-                                 address to,
-                                 uint256 deadline)
-      external nonReentrant payable returns(uint256[] memory amountsOut) {
-    require(msg.value >= amountIn, "INSUFFIENT_TRX");
-    require(poolVersion.length == versionLen.length && poolVersion.length > 0,
-            "INVALID_POOL_VERSION.");
-    require(path.length > 0, "INVALID_PATH");
-    require(path[0] == address(0), "INVALID_PATH");
-    amountsOut = new uint256[](path.length);
-    Context memory context;
-    context.path_i = 0;
-    context.deadline = deadline;
-    for (uint256 i = 0; i < poolVersion.length; i++) {
-      context.version = keccak256(abi.encodePacked(poolVersion[i]));
-      context.len = versionLen[i];
-      require(context.len > 0 && context.path_i + context.len <= path.length,
-              "INVALID_VERSION_LEN");
-      context.offset = i == 0 ? 0 : 1;
-      context.amountIn = i == 0 ? amountIn : amountsOut[context.path_i - 1];
-      context.amountOutMin = i + 1 == poolVersion.length ? amountOutMin : 1;
-      context.recipient = i + 1 == poolVersion.length ? to : address(this);
-      if (context.version == poolVersionV2) {
-        // v2 router
-        context.pathSlice = _constructPathSlice(path,
-                                                context.path_i - context.offset,
-                                                context.len + context.offset);
-        context.amountsOutSlice = _swapExactTokensForTokensV2(context);
-        for (uint256 j = 0; j < context.len; j++) {
-          amountsOut[context.path_i] = context.amountsOutSlice[j + context.offset];
-          context.path_i++;
-        }
-      } else if (context.version == poolVersionV1) {
-        // v1 factory
-        context.pathSlice = _constructPathSlice(path,
-                                                context.path_i - context.offset,
-                                                context.len + context.offset);
-        context.amountsOutSlice = _swapExactTokensForTokensV1(context);
-        for (uint256 j = 0; j < context.len; j++) {
-          amountsOut[context.path_i] = context.amountsOutSlice[j + context.offset];
-          context.path_i++;
-        }
-      } else {
-        // stable pool
-        require(i > 0, "stablePool not support token TRX");
-        context.pathSlice = _constructPathSlice(path,
-                                                context.path_i - context.offset,
-                                                context.len + context.offset);
-        context.amountsOutSlice = _stablePoolExchange(poolVersion[i],
-                                                      context.pathSlice,
-                                                      context.amountIn,
-                                                      context.amountOutMin);
-        for (uint256 j = 0; j < context.len; j++) {
-          amountsOut[context.path_i] = context.amountsOutSlice[j + 1];
-          context.path_i++;
-        }
-        if (context.path_i == path.length) {
-          amountsOut[context.path_i - 1] = _tokenSafeTransfer(
-            path[context.path_i - 1],
-            context.recipient,
-            amountsOut[context.path_i - 1]);
-          // double check
-          require(amountsOut[context.path_i - 1] >= context.amountOutMin,
-                  "amountOutMin not satisfied.");
-        }
-      }
-    }
-    assert(context.path_i == path.length);
-    emit SwapExactETHForTokens(msg.sender, amountIn, amountsOut);
-  }
-
-  /**
    * @dev Exchange function for converting Token to Token in a specified path.
    * @param amountIn Amount of Token to be solded.
    * @param amountOutMin Minimal amount of Token expected.
-   * @param path A specified exchange path from Token to token.
-   * @param poolVersion List of pool where tokens in path belongs to.
-   * @param versionLen List of token num in each pool.
    * @param to Address where token transfer to.
    * @param deadline Time after which this transaction can no longer be executed.
+   */
+  struct SwapData{
+    uint256 amountIn;
+    uint256 amountOutMin;
+    address to;
+    uint256 deadline;
+  }
+
+  /**
+   * @dev Exchange function for converting TRX to Token in a specified path.
+   * @param path A specified exchange path from TRX to token.
+   * @param poolVersion List of pool where tokens in path belongs to.
+   * @param versionLen List of token num in each pool.
+   * @param data encodepacked swap info.
    * @return amountsOut Amount of Tokens bought corresponed to path.
    */
-  function swapExactTokensForTokens(uint256 amountIn,
-                                    uint256 amountOutMin,
-                                    address[] calldata path,
-                                    string[] calldata poolVersion,
-                                    uint256[] calldata versionLen,
-                                    address to,
-                                    uint256 deadline)
-      external nonReentrant returns(uint256[] memory amountsOut) {
+  function swapExactInput(
+    address[] calldata path,
+    string[] calldata poolVersion,
+    uint256[] calldata versionLen,
+    uint24[] calldata fees,
+    SwapData calldata data
+  ) external nonReentrant payable returns(uint256[] memory amountsOut) {
     require(poolVersion.length == versionLen.length && poolVersion.length > 0,
             "INVALID_POOL_VERSION.");
-    require(path.length > 1, "INVALID_PATH");
-    require(path[0] != address(0), "INVALID_PATH");
+    require(path.length > 0, "INVALID_PATH");
+    require(path.length == fees.length, "INVALID_PATH");
     amountsOut = new uint256[](path.length);
-    amountsOut[0] = _tokenSafeTransferFrom(
-      path[0], msg.sender, address(this), amountIn);
+    if(path[0] == address(0)){
+      require(msg.value >= data.amountIn, "INSUFFIENT_TRX");
+      amountsOut[0] = data.amountIn;
+    }else{
+      amountsOut[0] = _tokenSafeTransferFrom(
+        path[0], 
+        msg.sender, 
+        address(this), 
+        data.amountIn
+      );
+    }
+
     Context memory context;
     context.path_i = 1;
-    context.deadline = deadline;
+    context.deadline = data.deadline;
     for (uint256 i = 0; i < poolVersion.length; i++) {
       context.version = keccak256(abi.encodePacked(poolVersion[i]));
       context.len = i == 0 ? versionLen[i] - 1 : versionLen[i];
@@ -324,8 +252,8 @@ contract SmartExchangeRouter is ReentrancyGuard {
               "INVALID_VERSION_LEN");
       context.amountIn = amountsOut[context.path_i - 1];
       // context.offset = 1;
-      context.amountOutMin = i + 1 == poolVersion.length ? amountOutMin : 1;
-      context.recipient = i + 1 == poolVersion.length ? to : address(this);
+      context.amountOutMin = i + 1 == poolVersion.length ? data.amountOutMin : 1;
+      context.recipient = i + 1 == poolVersion.length ? data.to : address(this);
       if (context.version == poolVersionV2) {
         // v2 router
         context.pathSlice = _constructPathSlice(path,
@@ -342,6 +270,19 @@ contract SmartExchangeRouter is ReentrancyGuard {
                                                 context.path_i - 1,
                                                 context.len + 1);
         context.amountsOutSlice = _swapExactTokensForTokensV1(context);
+        for (uint256 j = 0; j < context.len; j++) {
+          amountsOut[context.path_i] = context.amountsOutSlice[j + 1];
+          context.path_i++;
+        }
+      } else if(context.version == poolVersionV3){
+        context.pathSlice = _constructPathSlice(path,
+                                                context.path_i - 1,
+                                                context.len + 1);
+        context.feesSlice = _constructFeesSlice(fees,
+                                                context.path_i - 1,  
+                                                context.len + 1);
+        context.amountsOutSlice = _swapExactInputV3(context);
+
         for (uint256 j = 0; j < context.len; j++) {
           amountsOut[context.path_i] = context.amountsOutSlice[j + 1];
           context.path_i++;
@@ -371,7 +312,7 @@ contract SmartExchangeRouter is ReentrancyGuard {
       }
     }
     assert(context.path_i == path.length);
-    emit SwapExactTokensForTokens(msg.sender, amountIn, amountsOut);
+    emit SwapExactTokensForTokens(msg.sender, data.amountIn, amountsOut);
   }
 
   /**
@@ -392,7 +333,14 @@ contract SmartExchangeRouter is ReentrancyGuard {
       pathOut[j] = path[pos + j];
     }
   }
-
+  function _constructFeesSlice(uint24[] memory fees, uint256 pos, uint256 len)
+      internal pure returns(uint24[] memory feesOut) {
+    require(len > 1 && pos + len <= fees.length, "INVALID_FEES");
+    feesOut = new uint24[](len);
+    for (uint256 j = 0; j < len; j++) {
+      feesOut[j] = fees[pos + j];
+    }
+  }
   function _tokenSafeTransferFrom(address token,
                                   address from,
                                   address to,
@@ -567,123 +515,91 @@ contract SmartExchangeRouter is ReentrancyGuard {
   /**
    * v2 functions
    */
-  function _swapExactTokensForTokens(Context memory context)
-      internal returns (uint256[] memory amounts) {
-    require(context.pathSlice.length > 1, "INVALID_PATH_SLICE");
-    _approveToken(context.pathSlice[0], v2Router);
-    amounts = v2(v2Router).swapExactTokensForTokens(context.amountIn,
-                                                    context.amountOutMin,
-                                                    context.pathSlice,
-                                                    context.recipient,
-                                                    context.deadline);
-  }
-
-  function _swapExactETHForTokens(Context memory context)
-      internal returns (uint256[] memory amounts) {
-    // trx->wtrx->tokens
-    require(context.pathSlice.length > 2, "INVALID_PATH_SLICE");
-
-    amounts = new uint256[](context.pathSlice.length);
-    amounts[0] = context.amountIn;
-    // routerV2 will deposit trx for wtrx, shift path to wtrx->trokens
-    address[] memory pathSlice = _constructPathSlice(
-      context.pathSlice, 1, context.pathSlice.length - 1);
-    uint256[] memory amountsOutSlice = v2(v2Router)
-      .swapExactETHForTokens{value: amounts[0]}(context.amountOutMin,
-                                                pathSlice,
-                                                context.recipient,
-                                                context.deadline);
-    // merge amounts out
-    for (uint256 i = 0; i < amountsOutSlice.length; i++) {
-      amounts[i + 1] = amountsOutSlice[i];
-    }
-  }
-
-  function _swapExactTokensForETH(Context memory context)
-      internal returns (uint256[] memory amounts) {
-    // tokens->wtrx->trx
-    require(context.pathSlice.length > 1, "INVALID_PATH_SLICE");
-    _approveToken(context.pathSlice[0], v2Router);
-
-    amounts = new uint256[](context.pathSlice.length);
-    // routerV2 will withdraw wtrx for trx, truncate path to tokens->wtrx
-    address[] memory pathSlice = _constructPathSlice(
-      context.pathSlice, 0, context.pathSlice.length - 1);
-    uint256[] memory amountsOutSlice = v2(v2Router)
-      .swapExactTokensForETH(context.amountIn,
-                             context.amountOutMin,
-                             pathSlice,
-                             context.recipient,
-                             context.deadline);
-    // copy amounts out
-    for (uint256 i = 0; i < amountsOutSlice.length; i++) {
-      amounts[i] = amountsOutSlice[i];
-    }
-    // amount trx = amount wtrx
-    amounts[amounts.length - 1] = amounts[amounts.length - 2];
-  }
-
-  function _swapExactETHForETH(Context memory context)
-      internal returns (uint256[] memory amounts) {
-    // NOTIC(air.ye): in case of trx->wtrx->tokens->wtrx->trx
-    require(context.pathSlice.length > 4, "INVALID_PATH_SLICE");
-    amounts = new uint256[](context.pathSlice.length);
-    amounts[0] = context.amountIn;
-    Context memory ctx;
-    ctx.path_i = 1;
-    // invoke _swapExactETHForTokens costs more gas
-    // since constructPathSlice and amountOutSlice would copy twice
-    ctx.amountIn = amounts[0];
-    ctx.amountOutMin = 1;
-    ctx.pathSlice = _constructPathSlice(context.pathSlice, ctx.path_i, 2);
-    ctx.recipient = address(this);
-    ctx.deadline = context.deadline;
-    ctx.amountsOutSlice = v2(v2Router)
-      .swapExactETHForTokens{value: ctx.amountIn}(ctx.amountOutMin,
-                                                  ctx.pathSlice,
-                                                  ctx.recipient,
-                                                  ctx.deadline);
-    // merge amounts slice
-    for (uint256 i = 0; i < ctx.amountsOutSlice.length; i++) {
-      amounts[ctx.path_i] = ctx.amountsOutSlice[i];
-      ctx.path_i++;
-    }
-    // invoke _swapExactTokensForETH costs more gas
-    // since constructPathSlice and amountOutSlice would copy twice
-    ctx.amountIn = amounts[ctx.path_i - 1];
-    ctx.amountOutMin = context.amountOutMin;
-    ctx.pathSlice = _constructPathSlice(context.pathSlice,
-                                        ctx.path_i - 1,
-                                        context.pathSlice.length - ctx.path_i);
-    ctx.recipient = context.recipient;
-    _approveToken(ctx.pathSlice[0], v2Router);
-    ctx.amountsOutSlice = v2(v2Router).swapExactTokensForETH(ctx.amountIn,
-                                                             ctx.amountOutMin,
-                                                             ctx.pathSlice,
-                                                             ctx.recipient,
-                                                             ctx.deadline);
-    // merge amounts slice
-    for (uint256 i = 1; i < ctx.amountsOutSlice.length; i++) {
-      amounts[ctx.path_i] = ctx.amountsOutSlice[i];
-      ctx.path_i++;
-    }
-    // amount trx = amount wtrx
-    require(ctx.path_i == amounts.length - 1, "this should't happen");
-    amounts[ctx.path_i] = amounts[ctx.path_i - 1];
-  }
-
   function _swapExactTokensForTokensV2(Context memory context)
       internal returns (uint256[] memory amounts) {
     require(context.pathSlice.length > 1, "INVALID_PATH_SLICE");
     address tokenIn = context.pathSlice[0];
     address tokenOut = context.pathSlice[context.pathSlice.length - 1];
-    if (tokenIn == address(0)) {
-      return tokenOut == address(0) ? _swapExactETHForETH(context)
-                                    : _swapExactETHForTokens(context);
-    } else if (tokenOut == address(0)) {
-      return _swapExactTokensForETH(context);
-    } else {
-      return _swapExactTokensForTokens(context);
+    amounts = new uint256[](context.pathSlice.length);
+    uint256 midPath_start = 0;
+    address[] memory midPath;
+    if (tokenIn == address(0)){
+      amounts[0] = context.amountIn;
+      amounts[1] = context.amountIn;        
+      IWTRX(WTRX).deposit{value: context.amountIn}();
+      if(context.pathSlice.length == 2){
+        TransferHelper.safeTransfer(WTRX, context.recipient, context.amountIn);
+        return amounts;
+      }
+      midPath = _constructPathSlice(context.pathSlice, 1, context.pathSlice.length - 1);
+      midPath_start = 1;      
+    }else{
+      midPath = context.pathSlice;
+    }
+    uint256[] memory outAmounts;
+    //_approveToken(midPath[0], v2Router);
+    if(tokenOut == address(0)){
+      if(context.pathSlice.length == 2){
+        amounts[0] = context.amountIn;
+        amounts[1] = context.amountIn;
+        unwrapWTRX(context.amountIn, context.recipient);
+        return amounts;
+      }
+      _approveToken(midPath[0], v2Router);
+      outAmounts = v2(v2Router).swapExactTokensForTokens(
+        context.amountIn,
+        context.amountOutMin,
+        _constructPathSlice(midPath, 0, midPath.length - 1),
+        address(this),
+        context.deadline
+      );
+      for(uint256 i = 0; i < outAmounts.length; i++){
+        amounts[midPath_start + i] = outAmounts[i];
+      }
+      amounts[amounts.length - 1] = amounts[amounts.length - 2];
+      unwrapWTRX(amounts[amounts.length - 1], context.recipient);
+    }else{
+      _approveToken(midPath[0], v2Router);
+      outAmounts = v2(v2Router).swapExactTokensForTokens(
+        context.amountIn,
+        context.amountOutMin,
+        _constructPathSlice(midPath, 0, midPath.length),
+        context.recipient,
+        context.deadline
+      );
+      for(uint256 i = 0; i < outAmounts.length; i++){
+        amounts[midPath_start + i] = outAmounts[i];
+      }
+    }
+
+  }
+  /**
+   * v3 functions
+   */
+  function _swapExactInputV3(Context memory context) internal returns(uint256[] memory amounts){
+    amounts = new uint256[](context.pathSlice.length);
+    require(context.pathSlice.length > 1, "INVALID_PATH_SLICE");
+    // create the inputParams
+    v3.ExactInputParams memory inputParams;
+    inputParams.path = V3Encode.encodePath(context.pathSlice,context.feesSlice);
+    inputParams.recipient = context.recipient;
+    inputParams.deadline = context.deadline;
+    inputParams.amountIn = context.amountIn;
+    inputParams.amountOutMinimum = context.amountOutMin;
+    _approveToken(context.pathSlice[0], v3Router);
+    uint256  amountOut = v3(v3Router).exactInput(inputParams);
+    // merge amounts out
+    amounts[amounts.length - 1] = amountOut;
+  }
+
+  function unwrapWTRX(uint256 amountMinimum, address recipient) public payable{
+    uint256 balanceWTRX = erc20(WTRX).balanceOf(address(this));
+    require(balanceWTRX >= amountMinimum, "Insufficient WTRX");
+    if (balanceWTRX > 0) {
+      IWTRX(WTRX).withdraw(balanceWTRX);
+      if(recipient != address(this)){
+        TransferHelper.safeTransferETH(recipient, amountMinimum);
+      }
     }
   }
 }
