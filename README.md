@@ -1,6 +1,6 @@
 # smart-router 
 
-> ⚠️ **DEPRECATED**: This project is no longer maintained. Please check out [alternative-project](https://github.com/sun-protocol/SmartExchangeRouter) instead.
+> ⚠️ **DEPRECATED**: This project is no longer maintained. Please check out [sun-protocol/SmartExchangeRouter](https://github.com/sun-protocol/SmartExchangeRouter) instead.
 
 
 [![Tests](https://github.com/sunswapteam/smart-router/actions/workflows/tests.yml/badge.svg)](https://github.com/sunswapteam/smart-router/actions/workflows/tests.yml)
