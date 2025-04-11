@@ -1,5 +1,8 @@
 # smart-router 
 
+> ⚠️ **DEPRECATED**: This project is no longer maintained. Please check out [alternative-project](https://github.com/sun-protocol/SmartExchangeRouter) instead.
+
+
 [![Tests](https://github.com/sunswapteam/smart-router/actions/workflows/tests.yml/badge.svg)](https://github.com/sunswapteam/smart-router/actions/workflows/tests.yml)
 
 This repository contains the core smart contracts for the SmartRouter of sunio.
